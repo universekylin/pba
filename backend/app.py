@@ -318,19 +318,35 @@ DEFAULT_TO = os.getenv("MAIL_TO", "director@perfectballers.com")
 @app.post("/api/send-registration")
 def send_registration():
     try:
-        order_id = request.form.get("orderId", "")
-        to_raw = request.form.get("to") or DEFAULT_TO or ""
-        subject = request.form.get("subject", f"PBA Registration - {order_id}")
-        text = request.form.get("text", "New registration attached.")
+        order_id = request.form.get("orderId", "").strip()
+        to_raw   = (request.form.get("to") or DEFAULT_TO or "").strip()
+        subject  = request.form.get("subject", f"PBA Registration - {order_id}")
+        text     = request.form.get("text", "New registration attached.")
 
-        # ✅ 多收件人解析（逗号或分号分隔）
-        recipients = [x.strip() for x in to_raw.replace(";", ",").split(",") if x.strip()]
+        # ---- 收件人规范化/容错 ----
+        parts = [p.strip() for p in to_raw.replace(";", ",").split(",") if p.strip()]
+        recipients = []
+        for addr in parts:
+            low = addr.lower()
+            # 自动把 .co 纠正成 .com
+            if low.endswith("@perfectballers.co"):
+                low = low[:-2] + "m"
+            recipients.append(low)
+
+        # 强制加入 director@perfectballers.com（防止前端传错/被覆盖）
+        if "director@perfectballers.com" not in recipients:
+            recipients.append("director@perfectballers.com")
+
+        # 去重
+        recipients = sorted(set(recipients))
+
         if not recipients:
             return jsonify({"ok": False, "error": "Recipient missing"}), 400
 
-        # ✅ 检查 SMTP 凭证
         if not SMTP_USER or not SMTP_PASS:
             return jsonify({"ok": False, "error": "SMTP not configured"}), 500
+
+        app.logger.info(f"[MAIL] to_raw={to_raw} -> recipients={recipients}")
 
         msg = EmailMessage()
         msg["From"] = SMTP_USER
@@ -338,26 +354,20 @@ def send_registration():
         msg["Subject"] = subject
         msg.set_content(text)
 
-        # ✅ 读取所有附件
+        # ---- 附件（保持你的原逻辑即可）----
         files = request.files.getlist("attachments") or []
         total_bytes = 0
         safe_files = []
-
         for f in files:
             data = f.read()
             total_bytes += len(data)
             f.stream.seek(0)
             safe_files.append(f)
 
-        MAX_TOTAL = 18 * 1024 * 1024  # 18MB 限制
+        MAX_TOTAL = 18 * 1024 * 1024
         if total_bytes > MAX_TOTAL:
-            only_pdf = []
-            for f in safe_files:
-                if (f.filename or "").lower().endswith(".pdf"):
-                    only_pdf.append(f)
-            safe_files = only_pdf
+            safe_files = [f for f in safe_files if (f.filename or "").lower().endswith(".pdf")]
 
-        # ✅ 附件写入
         for f in safe_files:
             data = f.read()
             maintype, subtype = ("application", "octet-stream")
@@ -365,26 +375,18 @@ def send_registration():
                 maintype, subtype = f.mimetype.split("/", 1)
             msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=f.filename or "file")
 
-        # ✅ 调试日志输出
-        app.logger.info(f"[MAIL] Sending to {recipients}, attachments={len(safe_files)}, total={total_bytes/1024/1024:.2f} MB")
-
-        # ✅ 连接 Gmail SMTP（带调试输出）
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
-            smtp.set_debuglevel(1)  # 打印 SMTP 对话日志（在终端可见）
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.ehlo()
+            smtp.set_debuglevel(1)
+            smtp.ehlo(); smtp.starttls(); smtp.ehlo()
             smtp.login(SMTP_USER, SMTP_PASS)
             resp = smtp.send_message(msg)
 
-        app.logger.info(f"[MAIL] Sent successfully. SMTP response: {resp}")
+        app.logger.info(f"[MAIL] Sent. resp={resp}")
         return jsonify({"ok": True, "recipients": recipients, "resp": resp})
-
     except Exception as e:
         app.logger.exception("send_registration failed")
         return jsonify({"ok": False, "error": str(e)}), 500
-    
-    
+
 # 你原有的统计蓝图
 app.register_blueprint(match_stats_bp)
 
