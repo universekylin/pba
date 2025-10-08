@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     host: true,              // ★ 新增：允许 iPad 通过你的局域网 IP 访问
+    allowedHosts: ['pbaleague.com', 'www.pbaleague.com'], // ✅ 允许这些域名
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3001',

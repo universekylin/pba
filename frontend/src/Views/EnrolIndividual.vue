@@ -5,7 +5,7 @@
 
   <div class="page">
     <form class="form" @submit.prevent="onSubmit">
-      <h1 class="title">PBA 2024 S6~S7 Individual Player Registration Form</h1>
+      <h1 class="title">PBA 2024 S6 Individual Player Registration Form</h1>
 
       <!-- 1. Your Name * -->
       <div class="row">
